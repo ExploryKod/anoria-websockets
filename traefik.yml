@@ -1,0 +1,23 @@
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+# Certificats résolveurs pour Let's Encrypt (production)
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      tlsChallenge: {}
+      email: admin@example.com  # ⚠️ À MODIFIER avec votre email
+      storage: /letsencrypt/acme.json
+
+api:
+  insecure: true
+  dashboard: true
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: websocket-network
+

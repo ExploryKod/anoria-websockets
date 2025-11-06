@@ -1,4 +1,27 @@
 services:
+  traefik:
+    image: traefik:v2.11
+    container_name: traefik-websocket
+    restart: unless-stopped
+    command:
+      - "--configFile=/traefik.yml"
+    ports:
+      - "80:80"
+      - "443:443"     # WSS (nécessite sudo en local)
+      - "8443:443"    # WSS alternatif pour test local sans sudo (wss://localhost:8443)
+      - "9090:8080"  # Dashboard Traefik (port externe 9090, interne 8080)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/certs:ro  # Certificats SSL
+      - ./traefik.yml:/traefik.yml:ro  # Configuration Traefik
+    networks:
+      - websocket-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
   anoria-websocket:
     build:
       context: .
@@ -16,17 +39,43 @@ services:
           cpus: '0.1'        # Minimum 0.1 CPU garanti
           memory: 128M       # Minimum 128 MB de RAM garanti
     
+    # Exposer les ports pour développement local (ws://localhost:9876)
+    # En production, Traefik gère le routage via wss://
     ports:
-      - "9876:9876"
+      - "9876:9876"  # WebSocket (pour tests locaux)
+      - "9877:9877"  # API HTTP des salons
     
     environment:
       - NODE_ENV=production
       - PORT=9876
       - MAX_PLAYERS_PER_ROOM=2
     
+    # Labels Traefik pour la configuration automatique
+    labels:
+      - "traefik.enable=true"
+      
+      # WebSocket via Traefik (wss://)
+      # Pour production avec domaine : remplacez par votre domaine et utilisez letsencrypt
+      # Exemple: - "traefik.http.routers.websocket.rule=Host(`ws.votre-domaine.com`)"
+      - "traefik.http.routers.websocket.rule=Host(`localhost`) || Host(`194.164.76.63`) || HostRegexp(`.*`)"
+      - "traefik.http.routers.websocket.entrypoints=websecure"
+      - "traefik.http.routers.websocket.tls=true"
+      # Pour Let's Encrypt (production avec domaine) : décommentez la ligne suivante
+      # - "traefik.http.routers.websocket.tls.certresolver=letsencrypt"
+      - "traefik.http.services.websocket.loadbalancer.server.port=9876"
+      
+      # Headers WebSocket essentiels
+      - "traefik.http.routers.websocket.middlewares=websocket-headers"
+      - "traefik.http.middlewares.websocket-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      
+      # Support WebSocket (upgrade)
+      - "traefik.http.routers.websocket.service=websocket"
+      - "traefik.http.services.websocket.loadbalancer.server.scheme=ws"
+    
     # Healthcheck pour redémarrer automatiquement si le serveur plante
+    # Teste l'API HTTP des salons (port 9877) au lieu du WebSocket (port 9876)
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9876', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9877/rooms', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -42,4 +91,11 @@ services:
     # Volumes pour persister les logs (optionnel)
     volumes:
       - ./logs:/app/logs
+    
+    networks:
+      - websocket-network
+
+networks:
+  websocket-network:
+    driver: bridge
 
